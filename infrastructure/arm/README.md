@@ -57,16 +57,22 @@ az deployment group create \
    ```bash
    az keyvault secret set --vault-name $KV_NAME --name kalshi-api-key --value "YOUR_API_KEY"
    az keyvault secret set --vault-name $KV_NAME --name kalshi-private-key --file /path/to/your.pem
+   az keyvault secret set --vault-name $KV_NAME --name sp-client-secret --value "<SP_PASSWORD_FROM_STEP_1>"
    ```
 
 3. **Link Key Vault to Databricks** (uses the service principal from step 1):
 
-   - Workspace > User menu > Admin Settings > Secret scopes
+   - Workspace > Settings > Workspace > Security > Secret scopes
    - Create secret scope > Azure Key Vault-backed
+   - Scope name: `kalshi-secrets`
    - DNS name: `https://<keyVaultName>.vault.azure.net/`
-   - Scope name: `kv-kalshi`
+   - Resource ID: from Key Vault Properties in Azure Portal
 
-4. **Mount ADLS in Databricks** using the service principal (see Databricks docs for OAuth mount).
+4. **Mount ADLS in Databricks**:
+
+   - Upload and run `notebooks/mount_adls.ipynb`
+   - Set `STORAGE_ACCOUNT` from: `az deployment group show -g rg-kalshi-pipeline -n kalshi-deploy --query properties.outputs.storageAccountName.value -o tsv`
+   - Run all cells (requires `sp-client-secret` in Key Vault)
 
 ## Outputs
 

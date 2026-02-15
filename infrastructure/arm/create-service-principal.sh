@@ -4,7 +4,7 @@
 
 set -e
 RG="${1:-rg-kalshi-pipeline}"
-DEPLOY_NAME="${2:-mainTemplate}"
+DEPLOY_NAME="${2:-kalshi-deploy}"
 SP_NAME="sp-kalshi-databricks"
 
 echo "Resource group: $RG"
@@ -53,3 +53,4 @@ echo ""
 echo "Add secrets to Key Vault:"
 echo "  az keyvault secret set --vault-name $KV_NAME --name kalshi-api-key --value \"YOUR_API_KEY\""
 echo "  az keyvault secret set --vault-name $KV_NAME --name kalshi-private-key --file /path/to/your.pem"
+echo "  az keyvault secret set --vault-name $KV_NAME --name sp-client-secret --value \"$PASSWORD\""
