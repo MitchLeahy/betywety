@@ -1,0 +1,113 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "projectName": {
+      "type": "string",
+      "defaultValue": "kalshi",
+      "metadata": { "description": "Project name prefix for resources" }
+    },
+    "location": {
+      "type": "string",
+      "defaultValue": "[resourceGroup().location]",
+      "metadata": { "description": "Azure region for all resources" }
+    },
+    "databricksPricingTier": {
+      "type": "string",
+      "defaultValue": "standard",
+      "allowedValues": ["standard", "premium"],
+      "metadata": { "description": "Databricks workspace pricing tier" }
+    }
+  },
+  "variables": {
+    "resourceGroupName": "[resourceGroup().name]",
+    "uniqueSuffix": "[uniqueString(resourceGroup().id)]",
+    "storageAccountName": "[concat('st', toLower(parameters('projectName')), variables('uniqueSuffix'))]",
+    "keyVaultName": "[concat('kv', parameters('projectName'), variables('uniqueSuffix'))]",
+    "databricksWorkspaceName": "[concat('adb', parameters('projectName'))]"
+  },
+  "resources": [
+    {
+      "type": "Microsoft.Storage/storageAccounts",
+      "apiVersion": "2023-01-01",
+      "name": "[variables('storageAccountName')]",
+      "location": "[parameters('location')]",
+      "sku": { "name": "Standard_LRS", "tier": "Standard" },
+      "kind": "StorageV2",
+      "properties": {
+        "accessTier": "Hot",
+        "supportsHttpsTrafficOnly": true,
+        "minimumTlsVersion": "TLS1_2",
+        "allowBlobPublicAccess": false,
+        "isHnsEnabled": true
+      }
+    },
+    {
+      "type": "Microsoft.Storage/storageAccounts/blobServices/containers",
+      "apiVersion": "2023-01-01",
+      "name": "[concat(variables('storageAccountName'), '/default/kalshi-data')]",
+      "dependsOn": ["[resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName'))]"],
+      "properties": { "publicAccess": "None" }
+    },
+    {
+      "type": "Microsoft.KeyVault/vaults",
+      "apiVersion": "2023-07-01",
+      "name": "[variables('keyVaultName')]",
+      "location": "[parameters('location')]",
+      "properties": {
+        "sku": { "family": "A", "name": "standard" },
+        "tenantId": "[subscription().tenantId]",
+        "enabledForDeployment": false,
+        "enabledForDiskEncryption": false,
+        "enabledForTemplateDeployment": true,
+        "enableRbacAuthorization": true,
+        "enableSoftDelete": true,
+        "softDeleteRetentionInDays": 90
+      }
+    },
+    {
+      "type": "Microsoft.Databricks/workspaces",
+      "apiVersion": "2024-05-01",
+      "name": "[variables('databricksWorkspaceName')]",
+      "location": "[parameters('location')]",
+      "sku": { "name": "[parameters('databricksPricingTier')]" },
+      "properties": {
+        "managedResourceGroupId": "[concat(subscription().id, '/resourceGroups/databricks-rg-', variables('databricksWorkspaceName'), '-', variables('uniqueSuffix'))]",
+        "parameters": {
+          "enableNoPublicIp": { "value": false },
+          "prepareEncryption": { "value": true }
+        }
+      }
+    }
+  ],
+  "outputs": {
+    "storageAccountName": {
+      "type": "string",
+      "value": "[variables('storageAccountName')]"
+    },
+    "storageAccountId": {
+      "type": "string",
+      "value": "[resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName'))]"
+    },
+    "keyVaultName": {
+      "type": "string",
+      "value": "[variables('keyVaultName')]"
+    },
+    "keyVaultUri": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName'))).vaultUri]"
+    },
+    "databricksWorkspaceName": {
+      "type": "string",
+      "value": "[variables('databricksWorkspaceName')]"
+    },
+    "databricksWorkspaceUrl": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Databricks/workspaces', variables('databricksWorkspaceName'))).workspaceUrl]"
+    },
+    "adlsPath": {
+      "type": "string",
+      "value": "[concat('abfss://kalshi-data@', variables('storageAccountName'), '.dfs.core.windows.net/')]"
+    }
+  }
+}
