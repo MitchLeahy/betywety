@@ -1,0 +1,23 @@
+# Databricks Asset Bundle - Kalshi Pipeline
+#
+# Prerequisites:
+#   - databricks configure (or configure profile for your workspace)
+#   - Databricks CLI 0.218+
+#
+# Deploy:    databricks bundle deploy -t dev
+# Ingestion: runs hourly (or databricks bundle run kalshi_ingestion -t dev)
+# Stream:    start manually, runs until stopped
+
+bundle:
+  name: betywety
+
+include:
+  - resources/*.yml
+
+targets:
+  dev:
+    mode: development
+    default: true
+
+  prod:
+    mode: production

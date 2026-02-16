@@ -1,0 +1,46 @@
+# Kalshi pipeline jobs
+# Notebook paths are relative to bundle root (deployed to workspace)
+# Widgets: storage_account, series_id are set from job parameters
+
+resources:
+  jobs:
+    kalshi_ingestion:
+      name: "[${bundle.name}] Kalshi Ingestion"
+      description: "REST fetch events/markets, bronze, silver, ticker price update. Run hourly."
+      schedule:
+        quartz_cron_expression: "0 0 * * * ?"
+        timezone_id: "America/New_York"
+      job_clusters:
+        - job_cluster_key: ingestion_cluster
+          new_cluster:
+            spark_version: "14.3.x-scala2.12"
+            node_type_id: "Standard_DS3_v2"
+            num_workers: 0
+      tasks:
+        - task_key: ingestion
+          job_cluster_key: ingestion_cluster
+          notebook_task:
+            notebook_path: ../notebooks/kalshi_ingestion_pipeline.py
+            base_parameters:
+              storage_account: "stkalshiogihujuict7io"
+              series_id: "KXNCAAMBGAME"
+
+    kalshi_websocket_stream:
+      name: "[${bundle.name}] Kalshi WebSocket Stream"
+      description: "Stream ticker/trade to bronze. Start manually, runs until stopped. Uses active tickers from silver."
+      max_concurrent_runs: 1
+      job_clusters:
+        - job_cluster_key: stream_cluster
+          new_cluster:
+            spark_version: "14.3.x-scala2.12"
+            node_type_id: "Standard_DS3_v2"
+            num_workers: 0
+      tasks:
+        - task_key: stream
+          job_cluster_key: stream_cluster
+          notebook_task:
+            notebook_path: ../notebooks/kalshi_websocket_stream.py
+            base_parameters:
+              storage_account: "stkalshiogihujuict7io"
+              batch_size: "50"
+              flush_interval_sec: "30"

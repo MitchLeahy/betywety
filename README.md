@@ -61,3 +61,25 @@ flowchart TB
 1. Deploy infrastructure: see [infrastructure/arm/README.md](infrastructure/arm/README.md)
 2. Run `notebooks/kalshi_ingestion_pipeline.py` — REST fetch, bronze, silver
 3. Run `notebooks/kalshi_websocket_stream.py` — stream ticker/trade to bronze
+
+## Workflows (Databricks Asset Bundles)
+
+Jobs are defined in `databricks.yml` and `resources/jobs.yml`.
+
+**Deploy:**
+```bash
+databricks configure   # if not done
+databricks bundle deploy -t dev
+```
+
+**Jobs:**
+- **kalshi_ingestion** — Runs hourly. REST fetch → bronze → silver → price update.
+- **kalshi_websocket_stream** — Start manually, runs until stopped. Streams ticker/trade to bronze.
+
+**Manual run:**
+```bash
+databricks bundle run kalshi_ingestion -t dev
+databricks bundle run kalshi_websocket_stream -t dev
+```
+
+Or trigger from the Databricks Jobs UI after deploy.
