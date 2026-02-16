@@ -11,6 +11,11 @@
 # MAGIC ## Parameters
 
 # COMMAND ----------
+# MAGIC %md
+# MAGIC ### Install dependencies (run once, then restart cluster)
+# COMMAND ----------
+# MAGIC %pip install websockets cryptography nest_asyncio
+# COMMAND ----------
 dbutils.widgets.text("storage_account", "stkalshiogihujuict7io", "ADLS storage account name")
 dbutils.widgets.text("batch_size", "50", "Messages per batch before flush to Delta")
 dbutils.widgets.text("flush_interval_sec", "30", "Max seconds between flushes")
@@ -191,4 +196,7 @@ async def stream_and_dump():
     finally:
         maybe_flush(force=True)
 
+# nest_asyncio allows asyncio.run() inside Databricks/Jupyter (which already run an event loop)
+import nest_asyncio
+nest_asyncio.apply()
 asyncio.run(stream_and_dump())
