@@ -68,11 +68,12 @@ az deployment group create \
    - DNS name: `https://<keyVaultName>.vault.azure.net/`
    - Resource ID: from Key Vault Properties in Azure Portal
 
-4. **Mount ADLS in Databricks**:
+4. **Configure ADLS access in Databricks**:
 
    - Upload and run `notebooks/mount_adls.ipynb`
    - Set `STORAGE_ACCOUNT` from: `az deployment group show -g rg-kalshi-pipeline -n kalshi-deploy --query properties.outputs.storageAccountName.value -o tsv`
    - Run all cells (requires `sp-client-secret` in Key Vault)
+   - Uses direct ABFSS paths (no mount) - works when DBFS mounts are disabled. Use `KALSHI_DATA_PATH` in your pipelines.
 
 ## Outputs
 
