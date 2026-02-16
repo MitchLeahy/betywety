@@ -100,95 +100,48 @@ df_markets.write.format("delta").mode("append").save(bronze_markets_path)
 print(f"Written to {bronze_markets_path}")
 
 # COMMAND ----------
+# MAGIC %md
+# MAGIC ## Bronze to Silver - Events and Markets
+# MAGIC
+# MAGIC Reads bronze tables, deduplicates by ticker (keeps latest per entity), and writes cleaned data to silver.
+
+# COMMAND ----------
+from pyspark.sql import Window
+from pyspark.sql.functions import row_number, col
+
+# Silver: Events (dedupe by event_ticker)
+bronze_events_path = f"{KALSHI_DATA_PATH}/bronze/events"
+silver_events_path = f"{KALSHI_DATA_PATH}/silver/events"
+df_bronze_events = spark.read.format("delta").load(bronze_events_path)
+w_events = Window.partitionBy("event_ticker").orderBy(col("_ingestion_ts").desc())
+df_silver_events = (
+    df_bronze_events
+    .withColumn("_rn", row_number().over(w_events))
+    .filter(col("_rn") == 1)
+    .drop("_rn")
+)
+df_silver_events.write.format("delta").mode("overwrite").save(silver_events_path)
+print(f"Silver events: {df_silver_events.count()} unique events -> {silver_events_path}")
+
+# Silver: Markets (dedupe by market ticker)
+bronze_markets_path = f"{KALSHI_DATA_PATH}/bronze/markets"
+silver_markets_path = f"{KALSHI_DATA_PATH}/silver/markets"
+df_bronze_markets = spark.read.format("delta").load(bronze_markets_path)
+w_markets = Window.partitionBy("ticker").orderBy(col("_ingestion_ts").desc())
+df_silver_markets = (
+    df_bronze_markets
+    .withColumn("_rn", row_number().over(w_markets))
+    .filter(col("_rn") == 1)
+    .drop("_rn")
+)
+df_silver_markets.write.format("delta").mode("overwrite").save(silver_markets_path)
+print(f"Silver markets: {df_silver_markets.count()} unique markets -> {silver_markets_path}")
+
+# COMMAND ----------
 display(df_events)
 
 # COMMAND ----------
 display(df_markets)
 
 # COMMAND ----------
-# MAGIC %md
-# MAGIC ## WebSocket - Live ticker/trade stream
-
-# COMMAND ----------
-import asyncio
-import base64
-import json
-import time
-import websockets
-from cryptography.hazmat.primitives import serialization, hashes
-from cryptography.hazmat.primitives.asymmetric import padding
-
-# Load PEM and API key from Databricks secrets
-pem_str = dbutils.secrets.get(scope="kalshi-secrets", key="kalshi-private-key")
-api_key_id = dbutils.secrets.get(scope="kalshi-secrets", key="kalshi-api-key")
-
-private_key = serialization.load_pem_private_key(pem_str.encode(), password=None)
-
-WS_URL = "wss://api.elections.kalshi.com/trade-api/ws/v2"
-WS_PATH = "/trade-api/ws/v2"
-
-def sign_pss_text(private_key, text: str) -> str:
-    """Sign message using RSA-PSS."""
-    message = text.encode("utf-8")
-    signature = private_key.sign(
-        message,
-        padding.PSS(
-            mgf=padding.MGF1(hashes.SHA256()),
-            salt_length=padding.PSS.DIGEST_LENGTH,
-        ),
-        hashes.SHA256(),
-    )
-    return base64.b64encode(signature).decode("utf-8")
-
-def create_ws_headers(private_key, method: str, path: str) -> dict:
-    """Create WebSocket authentication headers."""
-    timestamp = str(int(time.time() * 1000))
-    msg_string = timestamp + method + path.split("?")[0]
-    signature = sign_pss_text(private_key, msg_string)
-    return {
-        "KALSHI-ACCESS-KEY": api_key_id,
-        "KALSHI-ACCESS-SIGNATURE": signature,
-        "KALSHI-ACCESS-TIMESTAMP": timestamp,
-    }
-
-# COMMAND ----------
-# Connect and subscribe - run this cell to start streaming (Ctrl+C to stop)
-async def stream_ticker_and_trades():
-    ws_headers = create_ws_headers(private_key, "GET", WS_PATH)
-
-    async with websockets.connect(WS_URL, additional_headers=ws_headers) as websocket:
-        print("Connected to Kalshi WebSocket")
-
-        # Subscribe to ticker (prices) and trade (executed trades)
-        subscribe_msg = {
-            "id": 1,
-            "cmd": "subscribe",
-            "params": {
-                "channels": ["ticker", "trade"],
-            },
-        }
-        await websocket.send(json.dumps(subscribe_msg))
-        print("Subscribed to ticker and trade channels")
-
-        async for message in websocket:
-            data = json.loads(message)
-            msg_type = data.get("type")
-
-            if msg_type == "subscribed":
-                print(f"Subscription confirmed: {data}")
-            elif msg_type == "ticker":
-                msg = data.get("msg", {})
-                market = msg.get("market_ticker", "")
-                yes_bid = msg.get("yes_bid", "")
-                yes_ask = msg.get("yes_ask", "")
-                print(f"Ticker {market}: Yes Bid {yes_bid}, Yes Ask {yes_ask}")
-            elif msg_type == "trade":
-                msg = data.get("msg", {})
-                market = msg.get("market_ticker", "")
-                price = msg.get("yes_price", msg.get("price", ""))
-                count = msg.get("count", "")
-                print(f"Trade {market}: price={price} count={count}")
-            elif msg_type == "error":
-                print(f"Error: {data}")
-
-asyncio.run(stream_ticker_and_trades())
+display(df_silver_markets)
