@@ -1,8 +1,8 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # Kalshi CBB Events - Bronze Ingestion (MVP)
+# MAGIC # Kalshi Ingestion Pipeline
 # MAGIC
-# MAGIC Fetches open events for a series (default: KXNCAAMBGAME) and writes to bronze layer.
+# MAGIC Bronze: fetches events and markets via REST API. Silver: dedupes and enriches with live ticker prices from WebSocket stream.
 
 # COMMAND ----------
 # MAGIC %md
@@ -136,6 +136,82 @@ df_silver_markets = (
 )
 df_silver_markets.write.format("delta").mode("overwrite").save(silver_markets_path)
 print(f"Silver markets: {df_silver_markets.count()} unique markets -> {silver_markets_path}")
+
+# COMMAND ----------
+# MAGIC %md
+# MAGIC ## Inspect ticker stream (bronze/ticker_snapshots)
+# MAGIC
+# MAGIC View WebSocket ticker data before joining to silver. Run WebSocket stream notebook first to populate.
+
+# COMMAND ----------
+bronze_ticker_path = f"{KALSHI_DATA_PATH}/bronze/ticker_snapshots"
+
+try:
+    df_ticker = spark.read.format("delta").load(bronze_ticker_path)
+    print(f"Schema:")
+    df_ticker.printSchema()
+    print(f"\nTotal records: {df_ticker.count()}")
+    print(f"\nSample (latest first):")
+    display(df_ticker.orderBy(col("_ingestion_ts").desc()).limit(50))
+
+    # Latest per market
+    w_ticker = Window.partitionBy("market_ticker").orderBy(col("_ingestion_ts").desc())
+    df_latest_ticker = (
+        df_ticker
+        .withColumn("_rn", row_number().over(w_ticker))
+        .filter(col("_rn") == 1)
+        .drop("_rn")
+    )
+    print(f"\nLatest ticker per market ({df_latest_ticker.count()} markets):")
+    display(df_latest_ticker)
+except Exception as e:
+    if "Path does not exist" in str(e) or "cannot find" in str(e).lower():
+        print("bronze/ticker_snapshots not found. Run kalshi_websocket_stream notebook first to populate.")
+    else:
+        raise
+
+# COMMAND ----------
+# MAGIC %md
+# MAGIC ## Update silver markets with latest prices from ticker stream
+# MAGIC
+# MAGIC Joins silver/markets with latest ticker snapshots (from WebSocket) and overwrites price columns when available.
+
+# COMMAND ----------
+from pyspark.sql.functions import coalesce
+
+# Get latest ticker per market from stream (skip if table doesn't exist yet)
+try:
+    df_ticker = spark.read.format("delta").load(bronze_ticker_path)
+    w_ticker = Window.partitionBy("market_ticker").orderBy(col("_ingestion_ts").desc())
+    df_latest_ticker = (
+        df_ticker
+        .withColumn("_rn", row_number().over(w_ticker))
+        .filter(col("_rn") == 1)
+        .drop("_rn")
+    )
+    ticker_cols = [f.name for f in df_latest_ticker.schema.fields]
+    price_cols = [c for c in ["yes_bid", "yes_ask", "last_price", "volume", "open_interest"]
+                  if c in df_silver_markets.columns and c in ticker_cols]
+
+    out_cols = []
+    for c in df_silver_markets.columns:
+        if c in price_cols:
+            out_cols.append(coalesce(col("t." + c), col("s." + c)).alias(c))
+        else:
+            out_cols.append(col("s." + c))
+
+    df_silver_with_prices = (
+        df_silver_markets.alias("s")
+        .join(df_latest_ticker.alias("t"), col("s.ticker") == col("t.market_ticker"), "left")
+        .select(out_cols)
+    )
+    df_silver_with_prices.write.format("delta").mode("overwrite").save(silver_markets_path)
+    print(f"Updated silver markets with latest prices from {df_latest_ticker.count()} ticker records")
+except Exception as e:
+    if "Path does not exist" in str(e) or "cannot find" in str(e).lower():
+        print("bronze/ticker_snapshots not found - run WebSocket stream first. Skipping price update.")
+    else:
+        raise
 
 # COMMAND ----------
 display(df_events)
