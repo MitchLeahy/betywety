@@ -2,8 +2,9 @@
 # MAGIC %md
 # MAGIC # Kalshi CBB Events - Bronze Ingestion (MVP)
 # MAGIC
-# MAGIC Fetches open events for a series (default: KXNCAAMBGAME) and writes to bronze layer.
-# MAGIC **Run mount_adls notebook first** to set `KALSHI_DATA_PATH`.
+# MAGIC Fetches open events for a series (default: KXNCAAMBGAME) and writes to Unity Catalog bronze table.
+# MAGIC
+# MAGIC **First run:** Create schema if needed: `CREATE SCHEMA IF NOT EXISTS main.kalshi_bronze;`
 
 # COMMAND ----------
 # MAGIC %md
@@ -11,6 +12,7 @@
 
 # COMMAND ----------
 dbutils.widgets.text("series_id", "KXNCAAMBGAME", "Series ticker (e.g. KXNCAAMBGAME)")
+dbutils.widgets.text("table", "main.kalshi_bronze.events", "Unity Catalog table (catalog.schema.table)")
 
 # COMMAND ----------
 # MAGIC %md
@@ -36,7 +38,7 @@ print(f"Fetched {len(all_events)} events for series {series_id}")
 
 # COMMAND ----------
 # MAGIC %md
-# MAGIC ## Write to bronze
+# MAGIC ## Write to bronze (Unity Catalog)
 
 # COMMAND ----------
 df_events = spark.createDataFrame(all_events)
@@ -45,11 +47,10 @@ df_events = spark.createDataFrame(all_events)
 df_events = df_events.withColumn("_ingestion_ts", current_timestamp())
 df_events = df_events.withColumn("_series_ticker", lit(series_id))
 
-# Bronze path: raw events per series
-bronze_path = f"{KALSHI_DATA_PATH}/bronze/events"
-df_events.write.format("delta").mode("append").save(bronze_path)
+table_name = dbutils.widgets.get("table")
+df_events.write.mode("append").saveAsTable(table_name)
 
-print(f"Written to {bronze_path}")
+print(f"Written to {table_name}")
 
 # COMMAND ----------
 display(df_events)
