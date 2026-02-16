@@ -40,3 +40,44 @@ def fetch_events(series_ticker: str, status: str = "open", limit: int = 200) -> 
             break
 
     return all_events
+
+
+def fetch_markets(
+    series_ticker: str,
+    status: str = "open",
+    limit: int = 200,
+) -> list[dict]:
+    """
+    Fetch all open markets for a series (paginated).
+
+    Args:
+        series_ticker: e.g. KXNCAAMBGAME for Men's College Basketball
+        status: market status filter (default: open)
+        limit: page size (default: 200)
+
+    Returns:
+        List of market dicts from the API
+    """
+    url = f"{BASE_URL}/markets"
+    all_markets = []
+    cursor = None
+
+    while True:
+        params = {
+            "series_ticker": series_ticker,
+            "status": status,
+            "limit": limit,
+        }
+        if cursor:
+            params["cursor"] = cursor
+
+        r = requests.get(url, params=params)
+        r.raise_for_status()
+        data = r.json()
+
+        all_markets.extend(data["markets"])
+        cursor = data.get("cursor")
+        if not cursor:
+            break
+
+    return all_markets
