@@ -1,5 +1,4 @@
-# Minimal deps for notebooks/test_kalshi_football.ipynb
-pandas>=2.0
+# Minimal deps for notebooks/test_kalshi_football.ipynb (Databricks: no pandas)
 requests>=2.28
 httpx>=0.24
 python-dotenv>=1.0
