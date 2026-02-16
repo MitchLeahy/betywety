@@ -1,6 +1,6 @@
 # ARM Deployment for Kalshi Pipeline
 
-Deploys Azure resources for the Kalshi college basketball live price pipeline.
+Deploys Azure resources for the Kalshi college basketball live price pipeline. See [project README](../../README.md) for data flow diagram.
 
 ## Resources Created
 
@@ -74,6 +74,11 @@ az deployment group create \
    - Set `STORAGE_ACCOUNT` from: `az deployment group show -g rg-kalshi-pipeline -n kalshi-deploy --query properties.outputs.storageAccountName.value -o tsv`
    - Run all cells (requires `sp-client-secret` in Key Vault)
    - Uses direct ABFSS paths (no mount) - works when DBFS mounts are disabled. Use `KALSHI_DATA_PATH` in your pipelines.
+
+5. **Run the pipeline notebooks** (in order):
+
+   - `notebooks/kalshi_ingestion_pipeline.py` — REST fetch, bronze, silver, ticker inspection, price update
+   - `notebooks/kalshi_websocket_stream.py` — Stream live ticker/trade data to bronze (run ingestion first so silver/markets exists)
 
 ## Outputs
 
