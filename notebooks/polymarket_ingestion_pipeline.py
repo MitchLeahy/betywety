@@ -9,33 +9,14 @@
 # MAGIC ## Parameters
 
 # COMMAND ----------
-dbutils.widgets.text("storage_account", "stkalshiogihujuict7io", "ADLS storage account name")
 dbutils.widgets.text("tag_id", "100149", "Polymarket tag ID (100149 = NCAAB)")
 
 # COMMAND ----------
 # MAGIC %md
-# MAGIC ## Configure ADLS
+# MAGIC ## ADLS path (auth via Unity Catalog external location)
 
 # COMMAND ----------
-container = "kalshi-data"
-STORAGE_ACCOUNT = dbutils.widgets.get("storage_account").strip()
-TENANT_ID = "b4b203c1-e6ed-4319-a1aa-80694c9ce7e9"
-CLIENT_ID = "5e532278-857e-493b-9185-ea6b714d1e42"
-
-if not STORAGE_ACCOUNT:
-    raise ValueError("Set storage_account widget")
-
-client_secret = dbutils.secrets.get(scope="kalshi-secrets", key="sp-client-secret")
-
-spark.conf.set(f"fs.azure.account.auth.type.{STORAGE_ACCOUNT}.dfs.core.windows.net", "OAuth")
-spark.conf.set(f"fs.azure.account.oauth.provider.type.{STORAGE_ACCOUNT}.dfs.core.windows.net",
-               "org.apache.hadoop.fs.azurebfs.oauth2.ClientCredsTokenProvider")
-spark.conf.set(f"fs.azure.account.oauth2.client.id.{STORAGE_ACCOUNT}.dfs.core.windows.net", CLIENT_ID)
-spark.conf.set(f"fs.azure.account.oauth2.client.secret.{STORAGE_ACCOUNT}.dfs.core.windows.net", client_secret)
-spark.conf.set(f"fs.azure.account.oauth2.client.endpoint.{STORAGE_ACCOUNT}.dfs.core.windows.net",
-               f"https://login.microsoftonline.com/{TENANT_ID}/oauth2/token")
-
-DATA_PATH = f"abfss://{container}@{STORAGE_ACCOUNT}.dfs.core.windows.net"
+DATA_PATH = "abfss://kalshi-data@stkalshiogihujuict7io.dfs.core.windows.net"
 print(f"DATA_PATH = {DATA_PATH}")
 
 # COMMAND ----------
