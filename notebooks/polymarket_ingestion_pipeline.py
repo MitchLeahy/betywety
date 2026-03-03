@@ -47,9 +47,17 @@ print(f"Fetched {len(all_events)} events (tag_id={tag_id})")
 
 # COMMAND ----------
 # Remove nested markets from events before writing (markets written separately)
+# Coerce int->float to avoid DoubleType/LongType merge errors across records
+SKIP_EVENT_KEYS = {"markets", "series", "categories", "collections", "tags", "chats", "templates", "eventCreators"}
 events_flat = []
 for e in all_events:
-    event_copy = {k: v for k, v in e.items() if k not in ("markets", "series", "categories", "collections", "tags", "chats", "templates", "eventCreators")}
+    event_copy = {}
+    for k, v in e.items():
+        if k in SKIP_EVENT_KEYS:
+            continue
+        if isinstance(v, int) and not isinstance(v, bool):
+            v = float(v)
+        event_copy[k] = v
     events_flat.append(event_copy)
 
 df_events = spark.createDataFrame(events_flat)
@@ -69,10 +77,16 @@ all_markets = extract_markets_from_events(all_events, active_only=True)
 print(f"Extracted {len(all_markets)} active markets from {len(all_events)} events")
 
 # COMMAND ----------
-# Flatten nested objects from markets before writing
+# Flatten nested objects and coerce numeric types to float for consistency
 markets_flat = []
 for m in all_markets:
-    market_copy = {k: v for k, v in m.items() if k not in ("events", "categories", "tags", "imageOptimized", "iconOptimized")}
+    market_copy = {}
+    for k, v in m.items():
+        if k in ("events", "categories", "tags", "imageOptimized", "iconOptimized"):
+            continue
+        if isinstance(v, int) and not isinstance(v, bool):
+            v = float(v)
+        market_copy[k] = v
     markets_flat.append(market_copy)
 
 df_markets = spark.createDataFrame(markets_flat)
