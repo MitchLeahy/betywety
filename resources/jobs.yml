@@ -78,7 +78,7 @@ resources:
           notebook_task:
             notebook_path: ../notebooks/polymarket_ingestion_pipeline.py
             base_parameters:
-              tag_id: "100149"
+              tag_id: "102114"
 
     polymarket_websocket_stream:
       name: "[${bundle.name}] Polymarket WebSocket Stream"

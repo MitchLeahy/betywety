@@ -10,8 +10,7 @@
 # MAGIC ## Parameters
 
 # COMMAND ----------
-
-dbutils.widgets.text("tag_id", "100149", "Polymarket tag ID (100149 = NCAAB)")
+dbutils.widgets.text("tag_id", "102114", "Polymarket tag ID (102114 = NCAAB games)")
 
 # COMMAND ----------
 
