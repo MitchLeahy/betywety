@@ -95,20 +95,27 @@ def fetch_markets(
     return all_markets
 
 
-def extract_markets_from_events(events: list[dict]) -> list[dict]:
+def extract_markets_from_events(
+    events: list[dict],
+    active_only: bool = True,
+) -> list[dict]:
     """
     Extract nested market dicts from event responses.
 
     Args:
         events: list of event dicts from fetch_events()
+        active_only: if True, skip markets where active=False or closed=True
 
     Returns:
-        Flat list of market dicts with event_id added
+        Flat list of market dicts with _event_id added
     """
     markets = []
     for event in events:
         event_id = event.get("id")
         for market in event.get("markets", []):
+            if active_only:
+                if not market.get("active") or market.get("closed"):
+                    continue
             market["_event_id"] = event_id
             markets.append(market)
     return markets

@@ -10,6 +10,7 @@
 
 # COMMAND ----------
 dbutils.widgets.text("storage_account", "stkalshiogihujuict7io", "ADLS storage account name")
+dbutils.widgets.text("tag_id", "100149", "Polymarket tag ID (100149 = NCAAB)")
 
 # COMMAND ----------
 # MAGIC %md
@@ -53,8 +54,11 @@ sys.path.insert(0, str(project_root))
 from src.polymarket.api import fetch_events, extract_markets_from_events
 from pyspark.sql.functions import current_timestamp, lit
 
-all_events = fetch_events(active=True, closed=False)
-print(f"Fetched {len(all_events)} events")
+tag_id_str = dbutils.widgets.get("tag_id").strip()
+tag_id = int(tag_id_str) if tag_id_str else None
+
+all_events = fetch_events(active=True, closed=False, tag_id=tag_id)
+print(f"Fetched {len(all_events)} events (tag_id={tag_id})")
 
 # COMMAND ----------
 # MAGIC %md
@@ -80,8 +84,8 @@ print(f"Written {df_events.count()} events to {bronze_events_path}")
 # MAGIC ## Extract and write markets to bronze
 
 # COMMAND ----------
-all_markets = extract_markets_from_events(all_events)
-print(f"Extracted {len(all_markets)} markets from events")
+all_markets = extract_markets_from_events(all_events, active_only=True)
+print(f"Extracted {len(all_markets)} active markets from {len(all_events)} events")
 
 # COMMAND ----------
 # Flatten nested objects from markets before writing

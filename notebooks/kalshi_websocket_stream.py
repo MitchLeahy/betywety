@@ -19,6 +19,7 @@
 dbutils.widgets.text("storage_account", "stkalshiogihujuict7io", "ADLS storage account name")
 dbutils.widgets.text("batch_size", "50", "Messages per batch before flush to Delta")
 dbutils.widgets.text("flush_interval_sec", "30", "Max seconds between flushes")
+dbutils.widgets.text("refresh_interval_sec", "300", "Seconds between subscription refreshes from silver")
 
 # COMMAND ----------
 # MAGIC %md
@@ -55,23 +56,24 @@ from pyspark.sql.functions import col
 
 silver_markets_path = f"{KALSHI_DATA_PATH}/silver/markets"
 
-df_silver_markets = spark.read.format("delta").load(silver_markets_path)
+def load_active_tickers() -> set:
+    """Re-read silver to get current active market tickers."""
+    df = spark.read.format("delta").load(silver_markets_path)
+    active_statuses = ["active", "open"]
+    rows = (
+        df.filter(col("status").isin(active_statuses))
+        .select("ticker")
+        .distinct()
+        .collect()
+    )
+    return {r.ticker for r in rows}
 
-# Filter for tradeable markets (Kalshi status: active = open for trading)
-active_statuses = ["active", "open"]
-market_tickers = (
-    df_silver_markets
-    .filter(col("status").isin(active_statuses))
-    .select("ticker")
-    .distinct()
-    .rdd.flatMap(lambda r: [r.ticker])
-    .collect()
-)
+market_tickers = load_active_tickers()
 
 if not market_tickers:
     raise ValueError("No active tickers found in silver/markets. Run bronze/silver ingestion first.")
 
-print(f"Subscribing to {len(market_tickers)} active markets: {market_tickers[:10]}{'...' if len(market_tickers) > 10 else ''}")
+print(f"Initial subscription: {len(market_tickers)} active markets")
 
 # COMMAND ----------
 # MAGIC %md
@@ -89,6 +91,7 @@ from pyspark.sql.functions import current_timestamp
 
 BATCH_SIZE = int(dbutils.widgets.get("batch_size"))
 FLUSH_INTERVAL_SEC = int(dbutils.widgets.get("flush_interval_sec"))
+REFRESH_INTERVAL_SEC = int(dbutils.widgets.get("refresh_interval_sec"))
 
 WS_URL = "wss://api.elections.kalshi.com/trade-api/ws/v2"
 WS_PATH = "/trade-api/ws/v2"
@@ -134,11 +137,19 @@ def flush_to_bronze(ticker_batch: list, trade_batch: list):
         print(f"Flushed {len(trade_batch)} trade records")
 
 # COMMAND ----------
-# Run this cell to start streaming (Ctrl+C to stop)
+# MAGIC %md
+# MAGIC The stream periodically re-reads silver to pick up new markets and drop resolved ones.
+# MAGIC Kalshi supports dynamic subscribe/unsubscribe without reconnecting.
+
+# COMMAND ----------
 async def stream_and_dump():
+    global market_tickers
     ticker_batch = []
     trade_batch = []
     last_flush = time.time()
+    last_refresh = time.time()
+    subscribed = set()
+    cmd_id = 1
 
     def maybe_flush(force=False):
         nonlocal ticker_batch, trade_batch, last_flush
@@ -160,25 +171,60 @@ async def stream_and_dump():
                 loop = asyncio.get_event_loop()
                 loop.run_in_executor(None, lambda t=to_flush_ticker, tr=to_flush_trade: flush_to_bronze(t, tr))
 
+    async def refresh_subscriptions(ws):
+        nonlocal subscribed, last_refresh, cmd_id
+        global market_tickers
+        try:
+            new_tickers = await asyncio.get_event_loop().run_in_executor(None, load_active_tickers)
+            to_add = new_tickers - subscribed
+            to_remove = subscribed - new_tickers
+
+            if to_add:
+                cmd_id += 1
+                msg = {"id": cmd_id, "cmd": "subscribe", "params": {"channels": ["ticker", "trade"], "market_tickers": list(to_add)}}
+                await ws.send(json.dumps(msg))
+                print(f"Refresh: subscribed to {len(to_add)} new tickers")
+
+            if to_remove:
+                cmd_id += 1
+                msg = {"id": cmd_id, "cmd": "unsubscribe", "params": {"channels": ["ticker", "trade"], "market_tickers": list(to_remove)}}
+                await ws.send(json.dumps(msg))
+                print(f"Refresh: unsubscribed from {len(to_remove)} stale tickers")
+
+            subscribed.clear()
+            subscribed.update(new_tickers)
+            market_tickers = new_tickers
+
+            if not to_add and not to_remove:
+                print(f"Refresh: no changes ({len(subscribed)} tickers)")
+        except Exception as e:
+            print(f"Refresh failed (will retry): {e}")
+        last_refresh = time.time()
+
     ws_headers = create_ws_headers(private_key, "GET", WS_PATH)
 
     try:
         async with websockets.connect(WS_URL, additional_headers=ws_headers) as websocket:
             print("Connected to Kalshi WebSocket")
 
-            # Subscribe to ticker and trade for our markets only
             subscribe_msg = {
-                "id": 1,
+                "id": cmd_id,
                 "cmd": "subscribe",
                 "params": {
                     "channels": ["ticker", "trade"],
-                    "market_tickers": market_tickers,
+                    "market_tickers": list(market_tickers),
                 },
             }
             await websocket.send(json.dumps(subscribe_msg))
+            subscribed.update(market_tickers)
             print(f"Subscribed to ticker + trade for {len(market_tickers)} markets")
 
             async for message in websocket:
+                now = time.time()
+
+                if now - last_refresh >= REFRESH_INTERVAL_SEC:
+                    await refresh_subscriptions(websocket)
+
                 data = json.loads(message)
                 msg_type = data.get("type")
                 msg = data.get("msg", {})
@@ -196,7 +242,6 @@ async def stream_and_dump():
     finally:
         maybe_flush(force=True)
 
-# nest_asyncio allows asyncio.run() inside Databricks/Jupyter (which already run an event loop)
 import nest_asyncio
 nest_asyncio.apply()
 asyncio.run(stream_and_dump())
