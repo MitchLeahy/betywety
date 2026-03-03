@@ -5,25 +5,39 @@
 # MAGIC Bronze: fetches events and markets via Gamma API. Silver: dedupes and enriches with live price data from WebSocket stream.
 
 # COMMAND ----------
+
 # MAGIC %md
 # MAGIC ## Parameters
 
 # COMMAND ----------
+
 dbutils.widgets.text("tag_id", "100149", "Polymarket tag ID (100149 = NCAAB)")
 
 # COMMAND ----------
+
 # MAGIC %md
 # MAGIC ## ADLS path (auth via Unity Catalog external location)
 
 # COMMAND ----------
+
 DATA_PATH = "abfss://kalshi-data@stkalshiogihujuict7io.dfs.core.windows.net"
 print(f"DATA_PATH = {DATA_PATH}")
 
 # COMMAND ----------
+
 # MAGIC %md
 # MAGIC ## Fetch events (public API, no auth)
 
 # COMMAND ----------
+
+# dbutils.fs.rm("abfss://kalshi-data@stkalshiogihujuict7io.dfs.core.windows.net/bronze/polymarket/events", recurse=True)
+# dbutils.fs.rm("abfss://kalshi-data@stkalshiogihujuict7io.dfs.core.windows.net/bronze/polymarket/markets", recurse=True)
+# dbutils.fs.rm("abfss://kalshi-data@stkalshiogihujuict7io.dfs.core.windows.net/silver/polymarket/events", recurse=True)
+# dbutils.fs.rm("abfss://kalshi-data@stkalshiogihujuict7io.dfs.core.windows.net/silver/polymarket/markets", recurse=True)
+# print("Cleaned all Polymarket bronze and silver tables")
+
+# COMMAND ----------
+
 import sys
 from pathlib import Path
 
@@ -42,10 +56,12 @@ all_events = fetch_events(active=True, closed=False, tag_id=tag_id)
 print(f"Fetched {len(all_events)} events (tag_id={tag_id})")
 
 # COMMAND ----------
+
 # MAGIC %md
 # MAGIC ## Write events to bronze
 
 # COMMAND ----------
+
 # Remove nested markets from events before writing (markets written separately)
 # Coerce int->float to avoid DoubleType/LongType merge errors across records
 SKIP_EVENT_KEYS = {"markets", "series", "categories", "collections", "tags", "chats", "templates", "eventCreators"}
@@ -75,14 +91,17 @@ df_events.write.format("delta").mode("append").save(bronze_events_path)
 print(f"Written {df_events.count()} events to {bronze_events_path}")
 
 # COMMAND ----------
+
 # MAGIC %md
 # MAGIC ## Extract and write markets to bronze
 
 # COMMAND ----------
+
 all_markets = extract_markets_from_events(all_events, active_only=True)
 print(f"Extracted {len(all_markets)} active markets from {len(all_events)} events")
 
 # COMMAND ----------
+
 # Flatten nested objects and coerce numeric types to float for consistency
 markets_flat = []
 for m in all_markets:
@@ -110,10 +129,12 @@ df_markets.write.format("delta").mode("append").save(bronze_markets_path)
 print(f"Written {df_markets.count()} markets to {bronze_markets_path}")
 
 # COMMAND ----------
+
 # MAGIC %md
 # MAGIC ## Bronze to Silver - Events and Markets
 
 # COMMAND ----------
+
 from pyspark.sql import Window
 from pyspark.sql.functions import row_number, col
 
@@ -144,12 +165,14 @@ df_silver_markets.write.format("delta").mode("overwrite").save(silver_markets_pa
 print(f"Silver markets: {df_silver_markets.count()} unique markets -> {silver_markets_path}")
 
 # COMMAND ----------
+
 # MAGIC %md
 # MAGIC ## Inspect price updates (bronze/polymarket/price_updates)
 # MAGIC
 # MAGIC View WebSocket data before joining to silver. Run polymarket_websocket_stream first to populate.
 
 # COMMAND ----------
+
 bronze_price_path = f"{DATA_PATH}/bronze/polymarket/price_updates"
 
 try:
@@ -166,10 +189,12 @@ except Exception as e:
         raise
 
 # COMMAND ----------
+
 # MAGIC %md
 # MAGIC ## Update silver markets with latest prices from WebSocket stream
 
 # COMMAND ----------
+
 from pyspark.sql.functions import coalesce
 
 try:
@@ -206,10 +231,13 @@ except Exception as e:
         raise
 
 # COMMAND ----------
+
 display(df_events)
 
 # COMMAND ----------
+
 display(df_markets)
 
 # COMMAND ----------
+
 display(df_silver_markets)
