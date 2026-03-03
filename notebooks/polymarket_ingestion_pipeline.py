@@ -60,6 +60,12 @@ for e in all_events:
         event_copy[k] = v
     events_flat.append(event_copy)
 
+non_none_keys = {k for r in events_flat for k, v in r.items() if v is not None}
+for r in events_flat:
+    for k in list(r.keys()):
+        if k not in non_none_keys:
+            del r[k]
+
 df_events = spark.createDataFrame(events_flat)
 df_events = df_events.withColumn("_ingestion_ts", current_timestamp())
 df_events = df_events.withColumn("_source", lit("polymarket"))
@@ -88,6 +94,12 @@ for m in all_markets:
             v = float(v)
         market_copy[k] = v
     markets_flat.append(market_copy)
+
+non_none_keys = {k for r in markets_flat for k, v in r.items() if v is not None}
+for r in markets_flat:
+    for k in list(r.keys()):
+        if k not in non_none_keys:
+            del r[k]
 
 df_markets = spark.createDataFrame(markets_flat)
 df_markets = df_markets.withColumn("_ingestion_ts", current_timestamp())
