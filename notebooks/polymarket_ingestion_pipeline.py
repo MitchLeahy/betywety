@@ -2,7 +2,7 @@
 # MAGIC %md
 # MAGIC # Polymarket Ingestion Pipeline
 # MAGIC
-# MAGIC Bronze: fetches events and markets via Gamma API. Silver: dedupes and enriches with live price data from WebSocket stream.
+# MAGIC Bronze: fetches events and markets via Gamma API. Silver: dedupes by conditionId/id. Live prices are maintained separately by the WebSocket stream (silver/polymarket/live_prices).
 
 # COMMAND ----------
 
@@ -184,48 +184,6 @@ try:
 except Exception as e:
     if "Path does not exist" in str(e) or "cannot find" in str(e).lower():
         print("bronze/polymarket/price_updates not found. Run polymarket_websocket_stream notebook first.")
-    else:
-        raise
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ## Update silver markets with latest prices from WebSocket stream
-
-# COMMAND ----------
-
-from pyspark.sql.functions import coalesce
-
-try:
-    df_prices = spark.read.format("delta").load(bronze_price_path)
-    w_price = Window.partitionBy("asset_id").orderBy(col("_ingestion_ts").desc())
-    df_latest_price = (
-        df_prices
-        .withColumn("_rn", row_number().over(w_price))
-        .filter(col("_rn") == 1)
-        .drop("_rn")
-    )
-    price_cols = [f.name for f in df_latest_price.schema.fields]
-    update_cols = [c for c in ["bestBid", "bestAsk", "lastTradePrice"]
-                   if c in df_silver_markets.columns and c in price_cols]
-
-    out_cols = []
-    for c in df_silver_markets.columns:
-        if c in update_cols:
-            out_cols.append(coalesce(col("t." + c), col("s." + c)).alias(c))
-        else:
-            out_cols.append(col("s." + c))
-
-    df_silver_with_prices = (
-        df_silver_markets.alias("s")
-        .join(df_latest_price.alias("t"), col("s.conditionId") == col("t.condition_id"), "left")
-        .select(out_cols)
-    )
-    df_silver_with_prices.write.format("delta").mode("overwrite").save(silver_markets_path)
-    print(f"Updated silver markets with latest prices from {df_latest_price.count()} price records")
-except Exception as e:
-    if "Path does not exist" in str(e) or "cannot find" in str(e).lower():
-        print("bronze/polymarket/price_updates not found - run WebSocket stream first. Skipping price update.")
     else:
         raise
 

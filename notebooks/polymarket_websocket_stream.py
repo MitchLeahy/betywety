@@ -5,6 +5,7 @@
 # MAGIC 1. Pulls active markets and token IDs from silver/polymarket/markets
 # MAGIC 2. Connects to Polymarket CLOB WebSocket (no auth required)
 # MAGIC 3. Buffers price messages and appends to bronze/polymarket/price_updates
+# MAGIC 4. On each flush, writes latest price per asset to silver/polymarket/live_prices
 
 # COMMAND ----------
 # MAGIC %md
@@ -92,15 +93,44 @@ MAX_SUB_SIZE = 100
 
 WS_URL = "wss://ws-subscriptions-clob.polymarket.com/ws/market"
 bronze_price_path = f"{DATA_PATH}/bronze/polymarket/price_updates"
+silver_live_prices_path = f"{DATA_PATH}/silver/polymarket/live_prices"
+
+def flush_latest_to_silver(batch: list):
+    """Write the latest price per asset_id to silver/polymarket/live_prices."""
+    if not batch:
+        return
+    from pyspark.sql.functions import row_number, current_timestamp as _cts
+    from pyspark.sql import Window
+
+    df_batch = spark.createDataFrame(batch)
+    w = Window.partitionBy("asset_id").orderBy(col("timestamp").desc())
+    df_latest = (
+        df_batch
+        .withColumn("_rn", row_number().over(w))
+        .filter(col("_rn") == 1)
+        .drop("_rn")
+        .withColumn("_updated_ts", _cts())
+    )
+
+    try:
+        df_existing = spark.read.format("delta").load(silver_live_prices_path)
+        df_keep = df_existing.join(df_latest, on="asset_id", how="left_anti")
+        df_merged = df_keep.unionByName(df_latest, allowMissingColumns=True)
+    except Exception:
+        df_merged = df_latest
+
+    df_merged.write.format("delta").mode("overwrite").save(silver_live_prices_path)
+    print(f"Silver live_prices updated: {df_merged.count()} rows")
 
 def flush_to_bronze(batch: list):
-    """Write buffered price messages to Delta."""
+    """Write buffered price messages to Delta and update silver live_prices."""
     if not batch:
         return
     df = spark.createDataFrame(batch)
     df = df.withColumn("_ingestion_ts", current_timestamp())
     df.write.format("delta").mode("append").save(bronze_price_path)
-    print(f"Flushed {len(batch)} price records")
+    print(f"Flushed {len(batch)} price records to bronze")
+    flush_latest_to_silver(batch)
 
 # COMMAND ----------
 async def stream_and_dump():

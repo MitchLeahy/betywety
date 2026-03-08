@@ -5,6 +5,7 @@
 # MAGIC 1. Pulls active market tickers from silver/markets
 # MAGIC 2. Connects to Kalshi WebSocket and subscribes to those tickers
 # MAGIC 3. Buffers ticker/trade messages and appends to bronze tables
+# MAGIC 4. On each flush, writes latest ticker snapshot per market to silver/live_prices
 
 # COMMAND ----------
 # MAGIC %md
@@ -79,6 +80,7 @@ WS_PATH = "/trade-api/ws/v2"
 
 bronze_ticker_path = f"{KALSHI_DATA_PATH}/bronze/ticker_snapshots"
 bronze_trades_path = f"{KALSHI_DATA_PATH}/bronze/trades"
+silver_live_prices_path = f"{KALSHI_DATA_PATH}/silver/live_prices"
 
 # Load PEM and API key
 pem_str = dbutils.secrets.get(scope="kalshi-secrets", key="kalshi-private-key")
@@ -104,18 +106,47 @@ def create_ws_headers(private_key, method: str, path: str) -> dict:
         "KALSHI-ACCESS-TIMESTAMP": timestamp,
     }
 
+def flush_latest_to_silver(ticker_batch: list):
+    """Write the latest ticker snapshot per market_ticker to silver/live_prices."""
+    if not ticker_batch:
+        return
+    from pyspark.sql.functions import row_number, current_timestamp as _cts
+    from pyspark.sql import Window
+
+    df_batch = spark.createDataFrame(ticker_batch)
+    w = Window.partitionBy("market_ticker").orderBy(col("_ingestion_ts").desc())
+    df_latest = (
+        df_batch
+        .withColumn("_ingestion_ts", _cts())
+        .withColumn("_rn", row_number().over(w))
+        .filter(col("_rn") == 1)
+        .drop("_rn")
+        .withColumn("_updated_ts", _cts())
+    )
+
+    try:
+        df_existing = spark.read.format("delta").load(silver_live_prices_path)
+        df_keep = df_existing.join(df_latest, on="market_ticker", how="left_anti")
+        df_merged = df_keep.unionByName(df_latest, allowMissingColumns=True)
+    except Exception:
+        df_merged = df_latest
+
+    df_merged.write.format("delta").mode("overwrite").save(silver_live_prices_path)
+    print(f"Silver live_prices updated: {df_merged.count()} rows")
+
 def flush_to_bronze(ticker_batch: list, trade_batch: list):
-    """Write buffered messages to Delta (run on main thread for Spark)."""
+    """Write buffered messages to Delta and update silver live_prices."""
     if ticker_batch:
         df = spark.createDataFrame(ticker_batch)
         df = df.withColumn("_ingestion_ts", current_timestamp())
         df.write.format("delta").mode("append").save(bronze_ticker_path)
-        print(f"Flushed {len(ticker_batch)} ticker records")
+        print(f"Flushed {len(ticker_batch)} ticker records to bronze")
+        flush_latest_to_silver(ticker_batch)
     if trade_batch:
         df = spark.createDataFrame(trade_batch)
         df = df.withColumn("_ingestion_ts", current_timestamp())
         df.write.format("delta").mode("append").save(bronze_trades_path)
-        print(f"Flushed {len(trade_batch)} trade records")
+        print(f"Flushed {len(trade_batch)} trade records to bronze")
 
 # COMMAND ----------
 # MAGIC %md
